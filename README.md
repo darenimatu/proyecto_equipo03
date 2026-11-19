@@ -1,1 +1,1 @@
-# proyecto_equipo03
+El Sistema de coordinación de viajes de ida y vuelta para docentes es una plataforma web que facilita la organización de los traslados del personal docente. Permite registrar y consultar viajes, destinos, horarios y disponibilidad de lugares. Cuenta con dos tipos de usuarios: pasajeros, quienes pueden solicitar lugares, y conductores, quienes registran los recorridos. Su propósito es mejorar la comunicación y hacer más sencilla la coordinación de los viajes.
