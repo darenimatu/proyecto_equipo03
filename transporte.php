@@ -1,3 +1,4 @@
+```php
 <?php
 require_once "config/conexion.php";
 
@@ -6,17 +7,31 @@ function e($valor) {
 }
 
 $mensaje = "";
+$tipoMensaje = "info";
+$editar = null;
+$transportes = [];
 
-if ($_SERVER["REQUEST_METHOD"] === "POST") {
-    $accion = $_POST["accion"] ?? "";
+try {
 
-    try {
+    if (!isset($pdo) || !($pdo instanceof PDO)) {
+        throw new Exception("La conexión PDO no está disponible.");
+    }
+
+    // REGISTRAR, ACTUALIZAR Y ELIMINAR
+    if ($_SERVER["REQUEST_METHOD"] === "POST") {
+
+        $accion = $_POST["accion"] ?? "";
+
         if ($accion === "guardar" || $accion === "actualizar") {
 
-            $tipo = trim($_POST["tipo_transporte"]);
-            $unidad = trim($_POST["numero_unidad"]);
-            $capacidad = (int)$_POST["capacidad"];
-            $conductor = trim($_POST["conductor"]);
+            $tipo = trim($_POST["tipo_transporte"] ?? "");
+            $numero = trim($_POST["numero_unidad"] ?? "");
+            $capacidad = (int)($_POST["capacidad"] ?? 0);
+            $conductor = trim($_POST["conductor"] ?? "");
+
+            if ($tipo === "" || $numero === "" || $capacidad <= 0 || $conductor === "") {
+                throw new Exception("Completa todos los campos correctamente.");
+            }
 
             if ($accion === "guardar") {
 
@@ -24,237 +39,582 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 (tipo_transporte, numero_unidad, capacidad, conductor)
                 VALUES (?, ?, ?, ?)";
 
-                $pdo->prepare($sql)->execute([
-                    $tipo, $unidad, $capacidad, $conductor
+                $stmt = $pdo->prepare($sql);
+
+                $stmt->execute([
+                    $tipo,
+                    $numero,
+                    $capacidad,
+                    $conductor
                 ]);
 
-                $mensaje = "Transporte registrado correctamente.";
+                $mensaje = "¡Transporte registrado correctamente!";
+                $tipoMensaje = "success";
 
             } else {
 
-                $id = (int)$_POST["id_transporte"];
+                $id = (int)($_POST["id_transporte"] ?? 0);
+
+                if ($id <= 0) {
+                    throw new Exception("Identificador de transporte inválido.");
+                }
 
                 $sql = "UPDATE transportes SET
-                tipo_transporte=?, numero_unidad=?,
-                capacidad=?, conductor=?
-                WHERE id_transporte=?";
+                tipo_transporte = ?,
+                numero_unidad = ?,
+                capacidad = ?,
+                conductor = ?
+                WHERE id_transporte = ?";
 
-                $pdo->prepare($sql)->execute([
-                    $tipo, $unidad, $capacidad, $conductor, $id
+                $stmt = $pdo->prepare($sql);
+
+                $stmt->execute([
+                    $tipo,
+                    $numero,
+                    $capacidad,
+                    $conductor,
+                    $id
                 ]);
 
-                $mensaje = "Transporte actualizado.";
+                $mensaje = "¡Transporte actualizado correctamente!";
+                $tipoMensaje = "success";
             }
 
         } elseif ($accion === "eliminar") {
 
-            $pdo->prepare(
-                "DELETE FROM transportes WHERE id_transporte=?"
-            )->execute([(int)$_POST["id_transporte"]]);
+            $id = (int)($_POST["id_transporte"] ?? 0);
 
-            $mensaje = "Transporte eliminado.";
+            if ($id <= 0) {
+                throw new Exception("Identificador inválido.");
+            }
+
+            $stmt = $pdo->prepare(
+                "DELETE FROM transportes WHERE id_transporte = ?"
+            );
+
+            $stmt->execute([$id]);
+
+            $mensaje = "Transporte eliminado correctamente.";
+            $tipoMensaje = "success";
         }
-
-    } catch (PDOException $ex) {
-        $mensaje = "No se pudo realizar la operación. Verifica si la unidad está registrada o asignada a un viaje.";
     }
+
+    // CONSULTAR PARA EDITAR
+    if (isset($_GET["editar"])) {
+
+        $id = (int)$_GET["editar"];
+
+        $stmt = $pdo->prepare(
+            "SELECT * FROM transportes WHERE id_transporte = ?"
+        );
+
+        $stmt->execute([$id]);
+
+        $editar = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$editar) {
+            $mensaje = "El transporte solicitado no existe.";
+            $tipoMensaje = "warning";
+        }
+    }
+
+    // MOSTRAR TRANSPORTES
+    $transportes = $pdo->query(
+        "SELECT * FROM transportes ORDER BY id_transporte DESC"
+    )->fetchAll(PDO::FETCH_ASSOC);
+
+} catch (PDOException $ex) {
+
+    if ($ex->getCode() == "23000") {
+        $mensaje = "El número de unidad ya está registrado o el transporte está relacionado con un viaje.";
+    } else {
+        $mensaje = "Error de base de datos: " . $ex->getMessage();
+    }
+
+    $tipoMensaje = "danger";
+
+} catch (Exception $ex) {
+
+    $mensaje = $ex->getMessage();
+    $tipoMensaje = "warning";
 }
-
-$editar = null;
-
-if (isset($_GET["editar"])) {
-    $st = $pdo->prepare(
-        "SELECT * FROM transportes WHERE id_transporte=?"
-    );
-    $st->execute([(int)$_GET["editar"]]);
-    $editar = $st->fetch(PDO::FETCH_ASSOC);
-}
-
-$transportes = $pdo->query(
-    "SELECT * FROM transportes ORDER BY id_transporte DESC"
-)->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Transportes | ViajesDocentes</title>
 
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<style>
-body { background:#f3f6fa; }
-.navbar { background:#183650; }
-.sidebar { background:white; min-height:100vh; }
-.sidebar a {
-    display:block;
-    padding:12px;
-    color:#43566b;
-    text-decoration:none;
-}
-.sidebar a:hover, .activo {
-    background:#e8f0f8;
-    color:#1c4c75;
-}
-.contenido { padding:28px; }
-.card { border:0; border-radius:13px; }
-</style>
+    <title>Transportes | ViajesDocentes</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <style>
+
+        body {
+            background: #f3f6fa;
+            font-family: Arial, sans-serif;
+        }
+
+        .navbar {
+            background: #183650;
+        }
+
+        .sidebar {
+            background: white;
+            min-height: 100vh;
+        }
+
+        .sidebar a {
+            display: block;
+            padding: 12px;
+            color: #43566b;
+            text-decoration: none;
+            border-radius: 8px;
+            margin-bottom: 5px;
+        }
+
+        .sidebar a:hover,
+        .sidebar .activo {
+            background: #e8f0f8;
+            color: #1c4c75;
+        }
+
+        .contenido {
+            padding: 28px;
+        }
+
+        .card {
+            border: 0;
+            border-radius: 13px;
+        }
+
+        .table {
+            vertical-align: middle;
+        }
+
+    </style>
+
 </head>
 
 <body>
 
-<nav class="navbar navbar-dark p-3">
-<span class="navbar-brand">🚌 ViajesDocentes</span>
-</nav>
+    <!-- BARRA SUPERIOR -->
 
-<div class="container-fluid">
-<div class="row">
+    <nav class="navbar navbar-dark p-3">
 
-<aside class="col-md-3 col-lg-2 sidebar p-3">
-<h6>MENÚ</h6>
-<a href="index.php">Inicio</a>
-<a href="nuevo_viaje.php">Programar viaje</a>
-<a href="viajes.php">Historial de viajes</a>
-<a href="docentes.php">Docentes</a>
-<a href="destinos.php">Destinos</a>
-<a href="transportes.php" class="activo">Transportes</a>
-</aside>
+        <div class="container-fluid">
 
-<main class="col-md-9 col-lg-10 contenido">
+            <span class="navbar-brand fw-bold">
+                🚌 ViajesDocentes
+            </span>
 
-<h1 class="h3">Administración de transportes</h1>
-<p class="text-secondary">Registro de unidades y conductores.</p>
+            <span class="text-white">
+                Sistema de coordinación de viajes
+            </span>
 
-<?php if ($mensaje): ?>
-<div class="alert alert-info"><?= e($mensaje) ?></div>
-<?php endif; ?>
+        </div>
 
-<div class="row g-4">
+    </nav>
 
-<div class="col-lg-5">
-<div class="card shadow-sm">
-<div class="card-body">
 
-<h5><?= $editar ? "Editar transporte" : "Registrar transporte" ?></h5>
+    <div class="container-fluid">
 
-<form method="POST">
+        <div class="row">
 
-<input type="hidden" name="accion"
-value="<?= $editar ? "actualizar" : "guardar" ?>">
+            <!-- MENÚ LATERAL -->
 
-<?php if ($editar): ?>
-<input type="hidden" name="id_transporte"
-value="<?= (int)$editar["id_transporte"] ?>">
-<?php endif; ?>
+            <aside class="col-md-3 col-lg-2 sidebar p-3">
 
-<div class="mb-3">
-<label class="form-label">Tipo de transporte</label>
-<input class="form-control" name="tipo_transporte"
-placeholder="Autobús o camioneta" required
-value="<?= e($editar["tipo_transporte"] ?? "") ?>">
-</div>
+                <h6 class="text-secondary mb-3">
+                    MENÚ PRINCIPAL
+                </h6>
 
-<div class="mb-3">
-<label class="form-label">Número de unidad</label>
-<input class="form-control" name="numero_unidad"
-required value="<?= e($editar["numero_unidad"] ?? "") ?>">
-</div>
+                <a href="index.php">
+                    🏠 Inicio
+                </a>
 
-<div class="mb-3">
-<label class="form-label">Capacidad de pasajeros</label>
-<input type="number" min="1" class="form-control"
-name="capacidad" required
-value="<?= e($editar["capacidad"] ?? "") ?>">
-</div>
+                <a href="nuevo_viaje.php">
+                    🚌 Programar viaje
+                </a>
 
-<div class="mb-3">
-<label class="form-label">Nombre del conductor</label>
-<input class="form-control" name="conductor"
-required value="<?= e($editar["conductor"] ?? "") ?>">
-</div>
+                <a href="viajes.php">
+                    📋 Historial de viajes
+                </a>
 
-<button class="btn btn-primary">
-<?= $editar ? "Guardar cambios" : "Registrar transporte" ?>
-</button>
+                <a href="docentes.php">
+                    👨‍🏫 Docentes
+                </a>
 
-<?php if ($editar): ?>
-<a href="transportes.php" class="btn btn-secondary">Cancelar</a>
-<?php endif; ?>
+                <a href="destino.php">
+                    📍 Destinos
+                </a>
 
-</form>
-</div>
-</div>
-</div>
+                <a href="transporte.php" class="activo">
+                    🚐 Transportes
+                </a>
 
-<div class="col-lg-7">
-<div class="card shadow-sm">
-<div class="card-body">
+            </aside>
 
-<h5>Transportes registrados</h5>
 
-<div class="table-responsive">
-<table class="table table-hover">
+            <!-- CONTENIDO PRINCIPAL -->
 
-<thead>
-<tr>
-<th>Tipo</th>
-<th>Unidad</th>
-<th>Capacidad</th>
-<th>Conductor</th>
-<th>Acciones</th>
-</tr>
-</thead>
+            <main class="col-md-9 col-lg-10 contenido">
 
-<tbody>
+                <h1 class="h3 fw-bold">
+                    Administración de transportes
+                </h1>
 
-<?php foreach ($transportes as $t): ?>
-<tr>
+                <p class="text-secondary">
+                    Registro y administración de unidades de transporte disponibles.
+                </p>
 
-<td><?= e($t["tipo_transporte"]) ?></td>
-<td><?= e($t["numero_unidad"]) ?></td>
-<td><?= (int)$t["capacidad"] ?></td>
-<td><?= e($t["conductor"]) ?></td>
 
-<td>
-<a class="btn btn-sm btn-primary"
-href="transportes.php?editar=<?= (int)$t["id_transporte"] ?>">
-Editar
-</a>
+                <!-- MENSAJES -->
 
-<form method="POST" class="d-inline"
-onsubmit="return confirm('¿Eliminar transporte?')">
+                <?php if ($mensaje): ?>
 
-<input type="hidden" name="accion" value="eliminar">
-<input type="hidden" name="id_transporte"
-value="<?= (int)$t["id_transporte"] ?>">
+                    <div class="alert alert-<?= e($tipoMensaje) ?> alert-dismissible fade show">
 
-<button class="btn btn-sm btn-danger">Eliminar</button>
-</form>
-</td>
+                        <?= e($mensaje) ?>
 
-</tr>
-<?php endforeach; ?>
+                        <button
+                            type="button"
+                            class="btn-close"
+                            data-bs-dismiss="alert">
+                        </button>
 
-<?php if (!$transportes): ?>
-<tr>
-<td colspan="5" class="text-center">No hay transportes registrados.</td>
-</tr>
-<?php endif; ?>
+                    </div>
 
-</tbody>
-</table>
-</div>
+                <?php endif; ?>
 
-</div>
-</div>
-</div>
 
-</div>
-</main>
-</div>
-</div>
+                <div class="row g-4">
+
+
+                    <!-- FORMULARIO DE REGISTRO -->
+
+                    <div class="col-lg-5">
+
+                        <div class="card shadow-sm">
+
+                            <div class="card-body">
+
+                                <h5 class="fw-bold mb-4">
+
+                                    <?= $editar ? "✏️ Editar transporte" : "🚐 Registrar transporte" ?>
+
+                                </h5>
+
+
+                                <form method="POST" action="transporte.php">
+
+                                    <input
+                                        type="hidden"
+                                        name="accion"
+                                        value="<?= $editar ? "actualizar" : "guardar" ?>"
+                                    >
+
+                                    <?php if ($editar): ?>
+
+                                        <input
+                                            type="hidden"
+                                            name="id_transporte"
+                                            value="<?= (int)$editar["id_transporte"] ?>"
+                                        >
+
+                                    <?php endif; ?>
+
+
+                                    <div class="mb-3">
+
+                                        <label class="form-label">
+                                            Tipo de transporte
+                                        </label>
+
+                                        <select
+                                            name="tipo_transporte"
+                                            class="form-select"
+                                            required
+                                        >
+
+                                            <option value="">
+                                                Selecciona el transporte
+                                            </option>
+
+                                            <?php
+                                            $tipos = [
+                                                "Autobús",
+                                                "Van",
+                                                "Camioneta",
+                                                "Automóvil",
+                                                "Microbús"
+                                            ];
+                                            ?>
+
+                                            <?php foreach ($tipos as $tipo): ?>
+
+                                                <option
+                                                    value="<?= e($tipo) ?>"
+                                                    <?= (($editar["tipo_transporte"] ?? "") === $tipo) ? "selected" : "" ?>
+                                                >
+                                                    <?= e($tipo) ?>
+                                                </option>
+
+                                            <?php endforeach; ?>
+
+                                        </select>
+
+                                    </div>
+
+
+                                    <div class="mb-3">
+
+                                        <label class="form-label">
+                                            Número de unidad
+                                        </label>
+
+                                        <input
+                                            type="text"
+                                            class="form-control"
+                                            name="numero_unidad"
+                                            placeholder="Ej. BUS-001"
+                                            maxlength="20"
+                                            required
+                                            value="<?= e($editar["numero_unidad"] ?? "") ?>"
+                                        >
+
+                                    </div>
+
+
+                                    <div class="mb-3">
+
+                                        <label class="form-label">
+                                            Capacidad de pasajeros
+                                        </label>
+
+                                        <input
+                                            type="number"
+                                            class="form-control"
+                                            name="capacidad"
+                                            placeholder="Ej. 40"
+                                            min="1"
+                                            required
+                                            value="<?= e($editar["capacidad"] ?? "") ?>"
+                                        >
+
+                                    </div>
+
+
+                                    <div class="mb-3">
+
+                                        <label class="form-label">
+                                            Nombre del conductor
+                                        </label>
+
+                                        <input
+                                            type="text"
+                                            class="form-control"
+                                            name="conductor"
+                                            placeholder="Nombre completo"
+                                            maxlength="100"
+                                            required
+                                            value="<?= e($editar["conductor"] ?? "") ?>"
+                                        >
+
+                                    </div>
+
+
+                                    <div class="d-flex gap-2">
+
+                                        <button
+                                            type="submit"
+                                            class="btn btn-primary"
+                                        >
+
+                                            <?= $editar ? "Guardar cambios" : "Registrar transporte" ?>
+
+                                        </button>
+
+
+                                        <?php if ($editar): ?>
+
+                                            <a
+                                                href="transporte.php"
+                                                class="btn btn-secondary"
+                                            >
+                                                Cancelar
+                                            </a>
+
+                                        <?php endif; ?>
+
+                                    </div>
+
+                                </form>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+
+
+                    <!-- TABLA DE TRANSPORTES -->
+
+                    <div class="col-lg-7">
+
+                        <div class="card shadow-sm">
+
+                            <div class="card-body">
+
+                                <h5 class="fw-bold mb-3">
+                                    🚐 Transportes registrados
+                                </h5>
+
+
+                                <div class="table-responsive">
+
+                                    <table class="table table-hover">
+
+                                        <thead class="table-light">
+
+                                            <tr>
+
+                                                <th>Tipo</th>
+                                                <th>Unidad</th>
+                                                <th>Capacidad</th>
+                                                <th>Conductor</th>
+                                                <th>Acciones</th>
+
+                                            </tr>
+
+                                        </thead>
+
+
+                                        <tbody>
+
+                                            <?php foreach ($transportes as $trans): ?>
+
+                                                <tr>
+
+                                                    <td>
+                                                        <?= e($trans["tipo_transporte"]) ?>
+                                                    </td>
+
+                                                    <td>
+                                                        <strong>
+                                                            <?= e($trans["numero_unidad"]) ?>
+                                                        </strong>
+                                                    </td>
+
+                                                    <td>
+                                                        <?= e($trans["capacidad"]) ?> pasajeros
+                                                    </td>
+
+                                                    <td>
+                                                        <?= e($trans["conductor"]) ?>
+                                                    </td>
+
+                                                    <td>
+
+                                                        <div class="d-flex gap-1">
+
+                                                            <a
+                                                                class="btn btn-sm btn-primary"
+                                                                href="transporte.php?editar=<?= (int)$trans["id_transporte"] ?>"
+                                                            >
+                                                                Editar
+                                                            </a>
+
+
+                                                            <form
+                                                                method="POST"
+                                                                action="transporte.php"
+                                                                onsubmit="return confirm('¿Eliminar este transporte?')"
+                                                            >
+
+                                                                <input
+                                                                    type="hidden"
+                                                                    name="accion"
+                                                                    value="eliminar"
+                                                                >
+
+                                                                <input
+                                                                    type="hidden"
+                                                                    name="id_transporte"
+                                                                    value="<?= (int)$trans["id_transporte"] ?>"
+                                                                >
+
+                                                                <button
+                                                                    type="submit"
+                                                                    class="btn btn-sm btn-danger"
+                                                                >
+                                                                    Eliminar
+                                                                </button>
+
+                                                            </form>
+
+                                                        </div>
+
+                                                    </td>
+
+                                                </tr>
+
+                                            <?php endforeach; ?>
+
+
+                                            <?php if (empty($transportes)): ?>
+
+                                                <tr>
+
+                                                    <td colspan="5" class="text-center text-secondary">
+                                                        No hay transportes registrados.
+                                                    </td>
+
+                                                </tr>
+
+                                            <?php endif; ?>
+
+                                        </tbody>
+
+                                    </table>
+
+                                </div>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- PIE DE PÁGINA -->
+
+                <footer class="text-center text-secondary mt-4">
+
+                    <p>
+                        ViajesDocentes © 2026 |
+                        Sistema de coordinación de viajes de ida y vuelta para docentes.
+                    </p>
+
+                </footer>
+
+            </main>
+
+        </div>
+
+    </div>
+
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
 
 </body>
+
 </html>
+```
